@@ -33,7 +33,13 @@ func Test_Signal(t *testing.T) {
 		log.Printf("Received : %v", e.GetPayload())
 	}
 
-	signal.When(condition).Subscribe(action)
+	canRun:= func(e xignals.Event) bool {
+		value , ok := e.GetPayload().(int);
+		// Some arbitrary test
+		return 	ok && value < 3
+	}
+
+	signal.While(canRun).When(condition).Subscribe(action)
 
 	e:= signal.Close()
 

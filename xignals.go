@@ -47,6 +47,7 @@ type Signal struct {
 	mutex sync.Mutex
 	closed bool
 	filter Filter
+	while Filter
 }
 
 // NewSignal() Signaler
@@ -56,6 +57,7 @@ func NewSignal() *Signal{
 		channel : make(chan Event),
 	}
 	signal.filter = Always
+	signal.while = Always
 	return signal
 }
 
@@ -66,7 +68,10 @@ func (s *Signal) Publish(payload interface{}) {
 
 	channelLength := len(s.channel)
 
-	completed:= s.eventCounter >= channelLength
+	completed:= false
+	if channelLength != 0 {
+		completed = s.eventCounter >= channelLength
+	}
 
 	var err error
 	if  channelLength !=0 && s.eventCounter > channelLength {
@@ -76,8 +81,15 @@ func (s *Signal) Publish(payload interface{}) {
 	s.channel <- MakeEvent(payload, completed, err)
 }
 
+func (s *Signal) Complete(err error) {
+	s.channel <- MakeEvent(nil, true, err)
+}
+
+
+
 // Subscribe to event
-func (s *Signal)Subscribe(action func(e Event), condition func(e Event) bool){
+// TODO: add subscription to actions?, subscriptions ?  and start monitoring ? instead of exec action
+func (s *Signal)Subscribe(action func(e Event)){
 
 	for event := range (s.channel) {
 
@@ -90,13 +102,20 @@ func (s *Signal)Subscribe(action func(e Event), condition func(e Event) bool){
 
 		// Event stream completed then close channel
 		if event.IsCompleted() {
-			log.Printf("INFO: event sequence completed")
+			log.Printf("INFO: event completed: %v", event)
 			s.Close()
 			return
 		}
 
-		// Wait for arbitrary condition , value as 3(int) ?, finish early
-		if condition(event) {
+		if !s.while(event) {
+			log.Printf("INFO: signal while not met: %v", event)
+			s.Close()
+			return
+		}
+
+		// Wait for arbitrary condition
+		if s.filter(event) {
+			log.Printf("ACTION: event : %v", event)
 			action(event)
 			return
 		}
@@ -106,11 +125,15 @@ func (s *Signal)Subscribe(action func(e Event), condition func(e Event) bool){
 	}
 }
 
+// ErrChannelClosed
+var ErrChannelClosed = errors.New("Already closed")
+
+
 // Close inner channel
 func (s *Signal) Close() error {
 	s.mutex.Lock()
 	if s.closed {
-		return errors.New("Already closed")
+		return ErrChannelClosed
 	}
 	s.closed = true
 	s.mutex.Unlock()
@@ -118,11 +141,20 @@ func (s *Signal) Close() error {
 	return nil
 }
 
+// Short for func(e Event) bool
 type Filter func(e Event) bool;
 
+// Short for func(e Event) bool { return true }
 var Always Filter = func(Event) bool { return true }
 
+// When this Filter returns true, subscription execs action
 func (s *Signal) When(f Filter) *Signal{
+	s.filter = f
+	return s
+}
+
+// While this filter is true , subscription execs action , if <while> is NOT met channel is Closed
+func (s *Signal) While(f Filter) *Signal{
 	s.filter = f
 	return s
 }
