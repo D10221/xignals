@@ -1,17 +1,17 @@
-package signals_test
+package xignals_test
 
 import (
 	"testing"
 	//"sync"
 	"time"
 	"log"
-	"github.com/D10221/tinystore/signals"
+	"github.com/D10221/xignals"
 )
 
 
 func Test_Signal(t *testing.T) {
 
-	signal:= signals.NewSignal()
+	signal:= xignals.NewSignal()
 
 	go func() {
 		for i := 0; i < 5; i++ {
@@ -22,17 +22,18 @@ func Test_Signal(t *testing.T) {
 	}()
 
 
-	while := func(e signals.Event)bool {
+	condition := func(e xignals.Event) bool {
 		if value, ok := e.GetPayload().(int); ok && value > 0 && value < 6 {
 			return true
 		}
 		return false
 	}
-	do:= func(e signals.Event){
+
+	action := func(e xignals.Event){
 		log.Printf("Received : %v", e.GetPayload())
 	}
 
-	signal.Subscribe(do, while)
+	signal.When(condition).Subscribe(action)
 
 	e:= signal.Close()
 

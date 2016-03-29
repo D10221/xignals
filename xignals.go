@@ -1,4 +1,4 @@
-package signals
+package xignals
 
 import (
 	"log"
@@ -46,6 +46,7 @@ type Signal struct {
 	channel chan Event
 	mutex sync.Mutex
 	closed bool
+	filter Filter
 }
 
 // NewSignal() Signaler
@@ -54,6 +55,7 @@ func NewSignal() *Signal{
 	signal:= &Signal {
 		channel : make(chan Event),
 	}
+	signal.filter = Always
 	return signal
 }
 
@@ -114,4 +116,13 @@ func (s *Signal) Close() error {
 	s.mutex.Unlock()
 	close(s.channel)
 	return nil
+}
+
+type Filter func(e Event) bool;
+
+var Always Filter = func(Event) bool { return true }
+
+func (s *Signal) When(f Filter) *Signal{
+	s.filter = f
+	return s
 }
