@@ -2,33 +2,16 @@ package xignals_test
 
 import (
 	"testing"
-	//"sync"
 	"time"
 	"log"
 	"github.com/D10221/xignals"
 	"errors"
 )
 
-type Subscrber struct {
-
-}
-
-type Publisher struct {
-	Xignal *xignals.Xignal
-}
-
-func (p *Publisher) Work(action func(x *xignals.Xignal)){
-	//publish:= func(payload)
-	go func() {
-		action(p.Xignal)
-	}()
-}
 
 func Test_Signal(t *testing.T) {
 
-	pub := &Publisher{
-	 	Xignal: xignals.NewSignal(),
-	}
+	x := xignals.NewSignal()
 
 	condition := func(e xignals.Event) bool {
 		canRun:= false
@@ -39,52 +22,67 @@ func Test_Signal(t *testing.T) {
 		return canRun
 	}
 
-	actions:= 0
+	workerActionCount := 0
 	action := func(e xignals.Event) error {
 		// Validate payload
 		if _, ok := e.GetPayload().(int); !ok {
 			return errors.New("Invalid Payload")
 		}
 		// work
-		actions++
-		log.Printf("action : %v", e.GetPayload())
+		workerActionCount++
+		log.Printf("Worker action count: %v", e.GetPayload())
 		return nil
 	}
 
-	runWhile := func(e xignals.Event) bool {
-		//value , ok := e.GetPayload().(int);
-		//// Some arbitrary test
-		//canRun:= ok && value < 3
-		//t.Logf("while: Can run %v", canRun)
-		//return 	canRun
-		return true
-	}
 
+	isCompleted := func(e xignals.Event) bool {
+		value , ok := e.GetPayload().(int);
+		// Some arbitrary test , Exit Early
+		completed := ok && value == 4
+		return completed
+	}
+	event_count := 0
 	// ...
 	worker := func( x *xignals.Xignal ) {
 		for i := 0; i < 5; i++ {
+			// Heavy Work
 			time.Sleep(time.Millisecond * 500)
+
+			// Notify
 			e:= x.Publish(i)
+			// Stop Pubishing onError
 			if e!=nil {
 				log.Printf("Error: %v", e)
 				break
 			}
+			// testing purposes
+			event_count++
 		}
+		// Complete event cycle , Not Subscription Cycle
 		e:= x.Complete()
+		//
 		if e!=nil {
 			log.Printf("Error: %v", e)
 		}
 	}
 
-	pub.Work(worker) // ...
+	//TODO:  Need to get subscriptions before worker starts publishing
+	// Currently it doesn't work
+	//  Start working
+	x.Work(worker) // ...
 
-	pub.Xignal.While(runWhile).When(condition).Subscribe(action).GO()
+	// Add Subscriptions
+	x.When(condition).CompleteWhen(isCompleted).Subscribe(action)
+	x.GO()
 
-	time.Sleep(time.Millisecond * 500 * 6 )
+	//time.Sleep(time.Millisecond * 500 * 6 )
 
 	expected:= 3
-	if actions!= expected {
-		t.Error("Actions: Expected %v, Got: %v", expected, actions)
+	if workerActionCount != expected {
+		t.Error("Worker action count : Expected %v, Got: %v", expected, workerActionCount)
+	}
+	if event_count != 5 {
+		t.Error("event_count: Expected %v, Got: %v", 5, workerActionCount)
 	}
 
 }

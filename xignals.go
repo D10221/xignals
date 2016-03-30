@@ -46,27 +46,20 @@ type Xignal struct {
 	channel chan Event
 	mutex sync.Mutex
 	closed bool
-	filter Filter
-	while Filter
-	action func(Event) error
+	Subsciptions []*Subscription
 }
 
 // NewSignal() Signaler
 func NewSignal() *Xignal {
-
 	signal:= &Xignal{
 		channel : make(chan Event),
+		Subsciptions: make([]*Subscription,0),
 	}
-	signal.filter = Always
-	signal.while = Always
 	return signal
 }
 
 // Publish
 func (s *Xignal) Publish(payload interface{}) error {
-	if s.IsClosed() {
-		return ErrChannelClosed
-	}
 
 	s.eventCounter++
 
@@ -82,96 +75,83 @@ func (s *Xignal) Publish(payload interface{}) error {
 		err = errors.New("Error")
 	}
 
-	if s.IsClosed() {
-		return ErrChannelClosed
-	}else {
-		s.channel <- MakeEvent(payload, completed, err)
-		return nil
-	}
+	s.channel <- MakeEvent(payload, completed, err)
+	return nil
 }
 
 func (s *Xignal) Complete() error {
+	// and Now? , no catch
 	var err error
-	if s.IsClosed(){
-		err = ErrChannelClosed
-		return err
-	}
 	s.channel <- MakeEvent(nil, true, err)
 	return err
 }
 
-
-// Subscribe to event
-// TODO: add subscription to actions?, subscriptions ?  and start monitoring ? instead of exec action
-func (this *Xignal) Subscribe(action func(e Event) error ) *Xignal {
-	this.action = action
-	return this
-}
-
 func (this *Xignal) GO() error {
+
 	var err error
+
 	for event := range (this.channel) {
 
 		// IsFaulted then close channel
 		if event.IsFaulted() {
-			this.Close()
 			err = event.GetError()
+			log.Printf("Xignal: event(%v) ERROR: %s", event, err.Error())
 			// No Need
 			break
 		}
 
 		// Event stream completed then close channel
 		if event.IsCompleted() {
-			log.Printf("COMPLETED: %v", event)
-			this.Close()
+			log.Printf("Xignal: COMPLETED: %v", event)
 			break
 		}
 
-		if !this.while(event) {
-			log.Printf("INFO: signal while not met: %v", event)
-			this.Complete()
-			break
-		}
+		// Loop subscriptions
+		for i, s:= range this.Subsciptions[:] {
 
-		// Wait for arbitrary condition
-		if this.filter(event) {
-			log.Printf("ACTION: event : %v", event)
-			err = this.action(event)
-			if err!=nil {
-				break
+			if s.completed(event) {
+				log.Printf("Xignal: INFO: Subscription Completed when : %v", event)
+				this.Subsciptions[i] = nil
+				continue
 			}
-			continue
-		}
 
-		log.Printf("SKIP: %v" , event)
+			if s.when(event) {
+				log.Printf("Xignal: INFO: subscription action(event: %v)", event)
+
+				err = s.action(event)
+
+				// onError remove
+				// TODO: s.OnError()
+				if err!=nil {
+					this.Subsciptions[i] = nil
+				}
+				continue
+			}
+			log.Printf("Xignal: Subscription Condition Not met , Skipped")
+		}
+		// Remove nils
+		notNil:= make([]*Subscription,0)
+		for _,s := range this.Subsciptions[:]{
+			if s != nil {
+				notNil = append(notNil, s)
+			}
+		}
+		this.Subsciptions = notNil
+
+		log.Printf("Xignal: NEXT: event %v" , event)
 		// Next
 	}
 
-	this.Close()
-
+	close(this.channel)
 	return err
 }
 
-// ErrChannelClosed
-var ErrChannelClosed = errors.New("Already closed")
+func (x *Xignal) Work(worker func(x *Xignal)){
 
+	go func() {
+		worker(x)
+	}()
 
-// Closed flag
-func (s *Xignal) Close() error {
-	if s.IsClosed() {
-		return ErrChannelClosed
-	}
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	s.closed = true
-	return nil
-}
-
-func (x *Xignal) IsClosed() bool {
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
-	return x.closed
 }
 
 // Short for func(e Event) bool
@@ -180,14 +160,50 @@ type Filter func(e Event) bool;
 // Short for func(e Event) bool { return true }
 var Always Filter = func(Event) bool { return true }
 
+// Short for func(e Event) bool { return false }
+var Never Filter = func(Event) bool { return false }
+
 // When this Filter returns true, subscription execs action
-func (s *Xignal) When(f Filter) *Xignal {
-	s.filter = f
+func (this *Xignal) When(f Filter) *Subscription {
+	s:= NewSubscription()
+	s.xignal = this
+	s.when = f
 	return s
 }
 
-// While this filter is true , subscription execs action , if <while> is NOT met channel is Closed
-func (s *Xignal) While(f Filter) *Xignal {
-	s.while = f
+// While this func return false, subscription runs  , if true , subscription is completed , and will be removed
+// completes subscription cycle NOT event Cycle
+// publisher publish event regardless of subscribers
+func (s *Subscription) CompleteWhen(f Filter) *Subscription {
+	s.completed = f
+	return s
+}
+
+
+// Subscribe to event
+// TODO: add subscription
+func (this *Subscription) Subscribe(action func(e Event) error ) *Subscription {
+	this.action = action
+	this.xignal.Subsciptions = append(this.xignal.Subsciptions, this )
+	return this
+}
+
+type Subscription struct {
+	xignal    *Xignal
+	when      Filter
+	completed Filter
+	action    func(e Event) error
+}
+
+var Nothing = func(e Event) error {
+	return nil
+}
+
+func NewSubscription() *Subscription{
+	s:= &Subscription{
+		completed: Never,
+		when: Always,
+		action: Nothing,
+	}
 	return s
 }
