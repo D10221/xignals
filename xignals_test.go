@@ -6,6 +6,7 @@ import (
 	"time"
 	"log"
 	"github.com/D10221/xignals"
+	"errors"
 )
 
 type Subscrber struct {
@@ -17,6 +18,7 @@ type Publisher struct {
 }
 
 func (p *Publisher) Work(action func(x *xignals.Xignal)){
+	//publish:= func(payload)
 	go func() {
 		action(p.Xignal)
 	}()
@@ -38,9 +40,15 @@ func Test_Signal(t *testing.T) {
 	}
 
 	actions:= 0
-	action := func(e xignals.Event){
+	action := func(e xignals.Event) error {
+		// Validate payload
+		if _, ok := e.GetPayload().(int); !ok {
+			return errors.New("Invalid Payload")
+		}
+		// work
 		actions++
 		log.Printf("action : %v", e.GetPayload())
+		return nil
 	}
 
 	runWhile := func(e xignals.Event) bool {
@@ -53,7 +61,7 @@ func Test_Signal(t *testing.T) {
 	}
 
 	// ...
-	worker:=func( x *xignals.Xignal) {
+	worker := func( x *xignals.Xignal ) {
 		for i := 0; i < 5; i++ {
 			time.Sleep(time.Millisecond * 500)
 			e:= x.Publish(i)
@@ -70,8 +78,7 @@ func Test_Signal(t *testing.T) {
 
 	pub.Work(worker) // ...
 
-	pub.Xignal.While(runWhile).When(condition).Subscribe(action)
-
+	pub.Xignal.While(runWhile).When(condition).Subscribe(action).GO()
 
 	time.Sleep(time.Millisecond * 500 * 6 )
 

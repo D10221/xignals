@@ -48,6 +48,7 @@ type Xignal struct {
 	closed bool
 	filter Filter
 	while Filter
+	action func(Event) error
 }
 
 // NewSignal() Signaler
@@ -102,14 +103,19 @@ func (s *Xignal) Complete() error {
 
 // Subscribe to event
 // TODO: add subscription to actions?, subscriptions ?  and start monitoring ? instead of exec action
-func (this *Xignal) Subscribe(action func(e Event)) {
+func (this *Xignal) Subscribe(action func(e Event) error ) *Xignal {
+	this.action = action
+	return this
+}
 
+func (this *Xignal) GO() error {
+	var err error
 	for event := range (this.channel) {
 
 		// IsFaulted then close channel
 		if event.IsFaulted() {
-			log.Printf("Error: %s", event.err.Error())
 			this.Close()
+			err = event.GetError()
 			// No Need
 			break
 		}
@@ -130,15 +136,20 @@ func (this *Xignal) Subscribe(action func(e Event)) {
 		// Wait for arbitrary condition
 		if this.filter(event) {
 			log.Printf("ACTION: event : %v", event)
-			action(event)
+			err = this.action(event)
+			if err!=nil {
+				break
+			}
 			continue
 		}
 
-		log.Printf("Idle: %v" , event)
+		log.Printf("SKIP: %v" , event)
 		// Next
 	}
 
 	this.Close()
+
+	return err
 }
 
 // ErrChannelClosed
