@@ -41,7 +41,7 @@ func MakeEvent(payload interface{}, completed bool, e error) Event {
 }
 
 
-type Signal struct {
+type Xignal struct {
 	eventCounter int
 	channel chan Event
 	mutex sync.Mutex
@@ -51,9 +51,9 @@ type Signal struct {
 }
 
 // NewSignal() Signaler
-func NewSignal() *Signal{
+func NewSignal() *Xignal {
 
-	signal:= &Signal {
+	signal:= &Xignal{
 		channel : make(chan Event),
 	}
 	signal.filter = Always
@@ -62,7 +62,10 @@ func NewSignal() *Signal{
 }
 
 // Publish
-func (s *Signal) Publish(payload interface{}) {
+func (s *Xignal) Publish(payload interface{}) error {
+	if s.IsClosed() {
+		return ErrChannelClosed
+	}
 
 	s.eventCounter++
 
@@ -78,67 +81,86 @@ func (s *Signal) Publish(payload interface{}) {
 		err = errors.New("Error")
 	}
 
-	s.channel <- MakeEvent(payload, completed, err)
+	if s.IsClosed() {
+		return ErrChannelClosed
+	}else {
+		s.channel <- MakeEvent(payload, completed, err)
+		return nil
+	}
 }
 
-func (s *Signal) Complete(err error) {
+func (s *Xignal) Complete() error {
+	var err error
+	if s.IsClosed(){
+		err = ErrChannelClosed
+		return err
+	}
 	s.channel <- MakeEvent(nil, true, err)
+	return err
 }
-
 
 
 // Subscribe to event
 // TODO: add subscription to actions?, subscriptions ?  and start monitoring ? instead of exec action
-func (s *Signal)Subscribe(action func(e Event)){
+func (this *Xignal) Subscribe(action func(e Event)) {
 
-	for event := range (s.channel) {
+	for event := range (this.channel) {
 
 		// IsFaulted then close channel
 		if event.IsFaulted() {
 			log.Printf("Error: %s", event.err.Error())
+			this.Close()
 			// No Need
-			s.Close()
+			break
 		}
 
 		// Event stream completed then close channel
 		if event.IsCompleted() {
-			log.Printf("INFO: event completed: %v", event)
-			s.Close()
-			return
+			log.Printf("COMPLETED: %v", event)
+			this.Close()
+			break
 		}
 
-		if !s.while(event) {
+		if !this.while(event) {
 			log.Printf("INFO: signal while not met: %v", event)
-			s.Close()
-			return
+			this.Complete()
+			break
 		}
 
 		// Wait for arbitrary condition
-		if s.filter(event) {
+		if this.filter(event) {
 			log.Printf("ACTION: event : %v", event)
 			action(event)
-			return
+			continue
 		}
 
 		log.Printf("Idle: %v" , event)
 		// Next
 	}
+
+	this.Close()
 }
 
 // ErrChannelClosed
 var ErrChannelClosed = errors.New("Already closed")
 
 
-// Close inner channel
-func (s *Signal) Close() error {
-	s.mutex.Lock()
-	if s.closed {
+// Closed flag
+func (s *Xignal) Close() error {
+	if s.IsClosed() {
 		return ErrChannelClosed
 	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	s.closed = true
-	s.mutex.Unlock()
-	close(s.channel)
 	return nil
+}
+
+func (x *Xignal) IsClosed() bool {
+	x.mutex.Lock()
+	defer x.mutex.Unlock()
+	return x.closed
 }
 
 // Short for func(e Event) bool
@@ -148,13 +170,13 @@ type Filter func(e Event) bool;
 var Always Filter = func(Event) bool { return true }
 
 // When this Filter returns true, subscription execs action
-func (s *Signal) When(f Filter) *Signal{
+func (s *Xignal) When(f Filter) *Xignal {
 	s.filter = f
 	return s
 }
 
 // While this filter is true , subscription execs action , if <while> is NOT met channel is Closed
-func (s *Signal) While(f Filter) *Signal{
-	s.filter = f
+func (s *Xignal) While(f Filter) *Xignal {
+	s.while = f
 	return s
 }

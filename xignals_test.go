@@ -8,45 +8,76 @@ import (
 	"github.com/D10221/xignals"
 )
 
+type Subscrber struct {
+
+}
+
+type Publisher struct {
+	Xignal *xignals.Xignal
+}
+
+func (p *Publisher) Work(action func(x *xignals.Xignal)){
+	go func() {
+		action(p.Xignal)
+	}()
+}
 
 func Test_Signal(t *testing.T) {
 
-	signal:= xignals.NewSignal()
-
-	go func() {
-		for i := 0; i < 5; i++ {
-			time.Sleep(time.Second * 1)
-			signal.Publish(i)
-		}
-		signal.Close()
-	}()
-
+	pub := &Publisher{
+	 	Xignal: xignals.NewSignal(),
+	}
 
 	condition := func(e xignals.Event) bool {
-		if value, ok := e.GetPayload().(int); ok && value > 0 && value < 6 {
-			return true
+		canRun:= false
+		if value, ok := e.GetPayload().(int); ok && value > 0 && value < 4 {
+			canRun = true
 		}
-		return false
+		// accepts 1,2,3
+		return canRun
 	}
 
+	actions:= 0
 	action := func(e xignals.Event){
-		log.Printf("Received : %v", e.GetPayload())
+		actions++
+		log.Printf("action : %v", e.GetPayload())
 	}
 
-	canRun:= func(e xignals.Event) bool {
-		value , ok := e.GetPayload().(int);
-		// Some arbitrary test
-		return 	ok && value < 3
+	runWhile := func(e xignals.Event) bool {
+		//value , ok := e.GetPayload().(int);
+		//// Some arbitrary test
+		//canRun:= ok && value < 3
+		//t.Logf("while: Can run %v", canRun)
+		//return 	canRun
+		return true
 	}
 
-	signal.While(canRun).When(condition).Subscribe(action)
+	// ...
+	worker:=func( x *xignals.Xignal) {
+		for i := 0; i < 5; i++ {
+			time.Sleep(time.Millisecond * 500)
+			e:= x.Publish(i)
+			if e!=nil {
+				log.Printf("Error: %v", e)
+				break
+			}
+		}
+		e:= x.Complete()
+		if e!=nil {
+			log.Printf("Error: %v", e)
+		}
+	}
 
-	e:= signal.Close()
+	pub.Work(worker) // ...
 
-	if e!=nil {
-		t.Log(e)
-	} else {
-		t.Error("Should be already closed")
+	pub.Xignal.While(runWhile).When(condition).Subscribe(action)
+
+
+	time.Sleep(time.Millisecond * 500 * 6 )
+
+	expected:= 3
+	if actions!= expected {
+		t.Error("Actions: Expected %v, Got: %v", expected, actions)
 	}
 
 }
