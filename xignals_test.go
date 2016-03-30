@@ -34,7 +34,7 @@ func Test_Signal(t *testing.T) {
 		return nil
 	}
 
-
+	//is Subscription Completed,
 	isCompleted := func(e xignals.Event) bool {
 		value , ok := e.GetPayload().(int);
 		// Some arbitrary test , Exit Early
@@ -50,7 +50,7 @@ func Test_Signal(t *testing.T) {
 
 			// Notify
 			e:= x.Publish(i)
-			// Stop Pubishing onError
+			// Stop Publishing onError
 			if e!=nil {
 				log.Printf("Error: %v", e)
 				break
@@ -73,6 +73,14 @@ func Test_Signal(t *testing.T) {
 
 	// Add Subscriptions
 	x.When(condition).CompleteWhen(isCompleted).Subscribe(action)
+
+	//Add another subs...
+	sayHello:= func(e xignals.Event) error {
+		log.Println("Hello")
+		return nil
+	}
+
+	x.When(xignals.Always).CompleteWhen(xignals.Never).Subscribe(sayHello)
 	x.GO()
 
 	//time.Sleep(time.Millisecond * 500 * 6 )
